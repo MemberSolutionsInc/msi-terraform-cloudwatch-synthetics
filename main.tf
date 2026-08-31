@@ -12,6 +12,10 @@ data "aws_region" "current" {}
 locals {
   artifact_bucket_name = coalesce(var.artifact_bucket_name, "msi-synthetics-artifacts-${data.aws_caller_identity.current.account_id}-${data.aws_region.current.name}")
   iam_role_name        = coalesce(var.iam_role_name, "msi-synthetics-canary-role")
+
+  # Whether any canary in this invocation runs inside a VPC — gates the EC2
+  # ENI permissions the shared execution role needs for Lambda-in-VPC.
+  any_canary_uses_vpc = anytrue([for c in var.canaries : c.vpc_config != null])
 }
 
 # ---------------------------------------------------------------------------
@@ -108,6 +112,22 @@ data "aws_iam_policy_document" "canary_execution" {
     actions   = ["xray:PutTraceSegments"]
     resources = ["*"]
   }
+
+  dynamic "statement" {
+    for_each = local.any_canary_uses_vpc ? [1] : []
+    content {
+      sid = "VpcEni"
+      actions = [
+        "ec2:CreateNetworkInterface",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeSubnets",
+        "ec2:DeleteNetworkInterface",
+        "ec2:AssignPrivateIpAddresses",
+        "ec2:UnassignPrivateIpAddresses",
+      ]
+      resources = ["*"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "canary_execution" {
@@ -171,6 +191,14 @@ resource "aws_synthetics_canary" "this" {
   artifact_config {
     s3_encryption {
       encryption_mode = "SSE_S3"
+    }
+  }
+
+  dynamic "vpc_config" {
+    for_each = each.value.vpc_config != null ? [each.value.vpc_config] : []
+    content {
+      subnet_ids         = vpc_config.value.subnet_ids
+      security_group_ids = vpc_config.value.security_group_ids
     }
   }
 

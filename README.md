@@ -40,6 +40,15 @@ module "synthetics" {
       url                 = "https://api.example.membersolutions.com/health"
       schedule_expression = "rate(5 minutes)"
     }
+
+    # Internal endpoint only reachable from inside the VPC.
+    internal-api-heartbeat = {
+      url = "https://internal-api.membersolutions.local/health"
+      vpc_config = {
+        subnet_ids         = ["subnet-0ec908cee648a56ad", "subnet-05c7929def90c4ba5"]
+        security_group_ids = ["sg-012178975e9e16833"]
+      }
+    }
   }
 
   route53_health_checks = {
@@ -72,7 +81,7 @@ module "synthetics" {
 
 | Name | Description | Type | Default |
 |------|-------------|------|---------|
-| `canaries` | Map of Synthetics canaries to create, keyed by canary name (1-21 chars, lowercase alphanumeric/hyphens). Each entry: `url`, plus optional `schedule_expression`, `runtime_version`, `handler`, `timeout_in_seconds`, `memory_in_mb`, `active_tracing`, `success_retention_days`, `failure_retention_days`. | `map(object)` | `{}` |
+| `canaries` | Map of Synthetics canaries to create, keyed by canary name (1-21 chars, lowercase alphanumeric/hyphens). Each entry: `url`, plus optional `schedule_expression`, `runtime_version`, `handler`, `timeout_in_seconds`, `memory_in_mb`, `active_tracing`, `success_retention_days`, `failure_retention_days`, `vpc_config` (`{ subnet_ids, security_group_ids }`, for internal endpoints not reachable from the Synthetics-managed network). | `map(object)` | `{}` |
 | `default_schedule_expression` | Default schedule expression when a canary entry doesn't set its own. | `string` | `"rate(5 minutes)"` |
 | `default_runtime_version` | Default Synthetics runtime version when a canary entry doesn't set its own. | `string` | `"syn-nodejs-puppeteer-9.1"` |
 | `default_handler` | Default handler string when a canary entry doesn't set its own. | `string` | `"heartbeat-canary.handler"` |
@@ -95,6 +104,19 @@ module "synthetics" {
 | `canary_execution_role_arn` | ARN of the shared canary execution IAM role. |
 | `route53_health_check_ids` | Map of health check name -> Route 53 health check id. |
 | `route53_health_check_metrics` | Map of health check name -> `{ namespace, metric_name, region, dimensions }` for the `HealthCheckStatus` metric, for wiring into alarms. |
+
+## VPC-attached canaries
+
+Set `vpc_config` on a canary entry to reach an internal endpoint (e.g. a
+private ALB) that isn't reachable from the Synthetics-managed network. If
+*any* canary in the invocation sets `vpc_config`, the shared execution role
+automatically gains the EC2 ENI permissions Lambda-in-VPC requires
+(`ec2:CreateNetworkInterface`, `DescribeNetworkInterfaces`, `DescribeSubnets`,
+`DeleteNetworkInterface`, `AssignPrivateIpAddresses`,
+`UnassignPrivateIpAddresses`) — the same set as AWS's own
+`AWSLambdaVPCAccessExecutionRole` managed policy. The subnets must have a
+route to an internet gateway or NAT gateway if the canary also needs to
+reach public AWS endpoints (e.g. to upload artifacts to S3).
 
 ## Notes on the canary script
 
