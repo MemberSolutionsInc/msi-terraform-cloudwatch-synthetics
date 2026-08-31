@@ -31,18 +31,18 @@ output "canary_success_rate_metrics" {
 }
 
 output "artifact_bucket_name" {
-  description = "Name of the shared S3 bucket storing canary run artifacts."
-  value       = aws_s3_bucket.canary_artifacts.bucket
+  description = "Name of the shared S3 bucket storing canary run artifacts (self-managed by this invocation, or the existing one passed in via artifact_bucket_name when manage_artifact_bucket is false)."
+  value       = local.artifact_bucket_name
 }
 
 output "artifact_bucket_arn" {
   description = "ARN of the shared S3 bucket storing canary run artifacts."
-  value       = aws_s3_bucket.canary_artifacts.arn
+  value       = "arn:aws:s3:::${local.artifact_bucket_name}"
 }
 
 output "canary_execution_role_arn" {
-  description = "ARN of the shared IAM role used as the execution role for every canary."
-  value       = aws_iam_role.canary.arn
+  description = "ARN of the IAM role used as the execution role for every canary (self-managed by this invocation, or the existing one passed in via iam_role_arn when manage_iam_role is false)."
+  value       = local.execution_role_arn
 }
 
 output "route53_health_check_ids" {

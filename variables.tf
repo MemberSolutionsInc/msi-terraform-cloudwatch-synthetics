@@ -55,19 +55,65 @@ variable "default_handler" {
 }
 
 variable "artifact_bucket_name" {
-  description = "Name of the S3 bucket used to store CloudWatch Synthetics canary run artifacts (screenshots, logs, HAR files) for every canary in this invocation. If null, a name is generated as `msi-synthetics-artifacts-<account-id>-<region>`."
+  description = "Name of the S3 bucket used to store CloudWatch Synthetics canary run artifacts (screenshots, logs, HAR files) for every canary in this invocation. If null and manage_artifact_bucket is true, a name is generated as `msi-synthetics-artifacts-<account-id>-<region>`. Required (an existing bucket's name) when manage_artifact_bucket is false."
   type        = string
   default     = null
 }
 
 variable "artifact_bucket_force_destroy" {
-  description = "Whether to allow Terraform to destroy the artifact bucket even if it still contains objects. Useful in non-production module invocations; leave false for production."
+  description = "Whether to allow Terraform to destroy the artifact bucket even if it still contains objects. Useful in non-production module invocations; leave false for production. Ignored when manage_artifact_bucket is false."
   type        = bool
   default     = false
 }
 
+variable "manage_artifact_bucket" {
+  description = <<-EOT
+    Whether this module invocation creates and owns the S3 artifact bucket.
+    Set to false to instead use an existing bucket (named via
+    artifact_bucket_name, which becomes required) that some other module
+    invocation already created — e.g. so several isolated per-canary
+    module invocations (each its own Terraform state) can share one bucket
+    instead of each creating their own, which would collide on the bucket
+    name.
+  EOT
+  type        = bool
+  default     = true
+
+  validation {
+    condition     = var.manage_artifact_bucket || var.artifact_bucket_name != null
+    error_message = "artifact_bucket_name is required (the existing bucket's name) when manage_artifact_bucket is false."
+  }
+}
+
 variable "iam_role_name" {
-  description = "Name of the shared IAM role used as the execution role for every canary created by this module invocation. If null, a name is generated as `msi-synthetics-canary-role`."
+  description = "Name of the shared IAM role used as the execution role for every canary created by this module invocation. If null and manage_iam_role is true, a name is generated as `msi-synthetics-canary-role`. Ignored when manage_iam_role is false."
+  type        = string
+  default     = null
+}
+
+variable "manage_iam_role" {
+  description = <<-EOT
+    Whether this module invocation creates and owns the canary execution
+    role. Set to false to instead use an existing role (via iam_role_arn,
+    which becomes required) that some other module invocation already
+    created — e.g. so several isolated per-canary module invocations (each
+    its own Terraform state) can share one execution role instead of each
+    creating their own, which would collide on the role name. That existing
+    role must already grant whatever this invocation's canaries need
+    (artifact bucket write access, VPC ENI permissions if applicable) —
+    this module does not modify a role it doesn't manage.
+  EOT
+  type        = bool
+  default     = true
+
+  validation {
+    condition     = var.manage_iam_role || var.iam_role_arn != null
+    error_message = "iam_role_arn is required (the existing role's ARN) when manage_iam_role is false."
+  }
+}
+
+variable "iam_role_arn" {
+  description = "ARN of an existing IAM role to use as the canary execution role when manage_iam_role is false. Ignored otherwise."
   type        = string
   default     = null
 }

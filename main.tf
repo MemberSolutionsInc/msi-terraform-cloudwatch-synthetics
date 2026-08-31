@@ -13,16 +13,32 @@ locals {
   artifact_bucket_name = coalesce(var.artifact_bucket_name, "msi-synthetics-artifacts-${data.aws_caller_identity.current.account_id}-${data.aws_region.current.name}")
   iam_role_name        = coalesce(var.iam_role_name, "msi-synthetics-canary-role")
 
+  # The execution role ARN every canary in this invocation actually uses:
+  # either the role this invocation creates, or an existing one passed in
+  # via iam_role_arn (see "Sharing a role/bucket across invocations" below).
+  execution_role_arn = var.manage_iam_role ? aws_iam_role.canary[0].arn : var.iam_role_arn
+
   # Whether any canary in this invocation runs inside a VPC — gates the EC2
-  # ENI permissions the shared execution role needs for Lambda-in-VPC.
+  # ENI permissions a self-managed execution role needs for Lambda-in-VPC.
   any_canary_uses_vpc = anytrue([for c in var.canaries : c.vpc_config != null])
 }
 
 # ---------------------------------------------------------------------------
 # Canary artifact storage
+#
+# Sharing a role/bucket across invocations: by default this module
+# invocation creates and owns its own bucket and execution role. Set
+# manage_artifact_bucket/manage_iam_role = false (with artifact_bucket_name
+# / iam_role_arn pointing at ones another invocation already created) when
+# several separate, isolated module invocations (e.g. one per canary, each
+# in its own Terraform state) should share one bucket/role instead of each
+# creating their own — which would otherwise collide, since S3 bucket names
+# and IAM role names are unique per account.
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "canary_artifacts" {
+  count = var.manage_artifact_bucket ? 1 : 0
+
   bucket        = local.artifact_bucket_name
   force_destroy = var.artifact_bucket_force_destroy
 
@@ -30,7 +46,9 @@ resource "aws_s3_bucket" "canary_artifacts" {
 }
 
 resource "aws_s3_bucket_public_access_block" "canary_artifacts" {
-  bucket = aws_s3_bucket.canary_artifacts.id
+  count = var.manage_artifact_bucket ? 1 : 0
+
+  bucket = aws_s3_bucket.canary_artifacts[0].id
 
   block_public_acls       = true
   block_public_policy     = true
@@ -39,7 +57,9 @@ resource "aws_s3_bucket_public_access_block" "canary_artifacts" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "canary_artifacts" {
-  bucket = aws_s3_bucket.canary_artifacts.id
+  count = var.manage_artifact_bucket ? 1 : 0
+
+  bucket = aws_s3_bucket.canary_artifacts[0].id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -67,6 +87,8 @@ data "aws_iam_policy_document" "canary_assume_role" {
 }
 
 resource "aws_iam_role" "canary" {
+  count = var.manage_iam_role ? 1 : 0
+
   name               = local.iam_role_name
   assume_role_policy = data.aws_iam_policy_document.canary_assume_role.json
 
@@ -74,12 +96,14 @@ resource "aws_iam_role" "canary" {
 }
 
 data "aws_iam_policy_document" "canary_execution" {
+  count = var.manage_iam_role ? 1 : 0
+
   statement {
     sid     = "ArtifactBucketWrite"
     actions = ["s3:PutObject", "s3:GetBucketLocation"]
     resources = [
-      aws_s3_bucket.canary_artifacts.arn,
-      "${aws_s3_bucket.canary_artifacts.arn}/*",
+      "arn:aws:s3:::${local.artifact_bucket_name}",
+      "arn:aws:s3:::${local.artifact_bucket_name}/*",
     ]
   }
 
@@ -131,9 +155,11 @@ data "aws_iam_policy_document" "canary_execution" {
 }
 
 resource "aws_iam_role_policy" "canary_execution" {
+  count = var.manage_iam_role ? 1 : 0
+
   name   = "${local.iam_role_name}-execution"
-  role   = aws_iam_role.canary.id
-  policy = data.aws_iam_policy_document.canary_execution.json
+  role   = aws_iam_role.canary[0].id
+  policy = data.aws_iam_policy_document.canary_execution[0].json
 }
 
 # ---------------------------------------------------------------------------
@@ -163,8 +189,8 @@ resource "aws_synthetics_canary" "this" {
   for_each = var.canaries
 
   name                 = each.key
-  artifact_s3_location = "s3://${aws_s3_bucket.canary_artifacts.bucket}/${each.key}/"
-  execution_role_arn   = aws_iam_role.canary.arn
+  artifact_s3_location = "s3://${local.artifact_bucket_name}/${each.key}/"
+  execution_role_arn   = local.execution_role_arn
   runtime_version      = coalesce(each.value.runtime_version, var.default_runtime_version)
   handler              = coalesce(each.value.handler, var.default_handler)
   zip_file             = data.archive_file.heartbeat_canary.output_path
@@ -204,6 +230,9 @@ resource "aws_synthetics_canary" "this" {
 
   tags = merge(var.tags, { Name = each.key })
 
+  # References to the whole (count-based) resources below, not indexed —
+  # valid and a no-op when count is 0, i.e. when this invocation doesn't
+  # manage that resource at all.
   depends_on = [
     aws_iam_role_policy.canary_execution,
     aws_s3_bucket_server_side_encryption_configuration.canary_artifacts,
