@@ -17,6 +17,16 @@ variable "canaries" {
     active_tracing         = optional(bool, false)
     success_retention_days = optional(number, 31)
     failure_retention_days = optional(number, 31)
+
+    # Set to reach an internal/private endpoint (e.g. an internal ALB) that
+    # isn't reachable from the Synthetics-managed network. Omit for public
+    # endpoints. Any canary in this map that sets vpc_config causes the
+    # shared execution role to also get the EC2 ENI permissions Lambda
+    # needs to run inside a VPC.
+    vpc_config = optional(object({
+      subnet_ids         = list(string)
+      security_group_ids = list(string)
+    }))
   }))
   default = {}
 
