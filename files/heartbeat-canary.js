@@ -73,6 +73,13 @@ const apiCanaryBlueprint = async function () {
     includeResponseHeaders: true,
     restrictedHeaders: [],
     restrictedUrlParameters: [],
+    // This is a plain HTTP status check, not a UI test - a screenshot of
+    // a heartbeat request/response has no diagnostic value, just S3 cost.
+    // Some syn-nodejs-puppeteer-* runtimes default these to true, so set
+    // explicitly rather than relying on the runtime's own default.
+    screenshotOnStepStart: false,
+    screenshotOnStepSuccess: false,
+    screenshotOnStepFailure: false,
   });
 
   if (!TARGET_URL) {
@@ -84,6 +91,9 @@ const apiCanaryBlueprint = async function () {
     includeResponseHeaders: true,
     restrictedHeaders: [],
     restrictedUrlParameters: [],
+    screenshotOnStepStart: false,
+    screenshotOnStepSuccess: false,
+    screenshotOnStepFailure: false,
   };
 
   // Pass a requestOptions object (rather than the plain URL string) only
