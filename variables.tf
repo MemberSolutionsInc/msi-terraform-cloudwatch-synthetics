@@ -45,7 +45,7 @@ variable "default_schedule_expression" {
 variable "default_runtime_version" {
   description = "Default CloudWatch Synthetics runtime version used when a canary entry does not set its own `runtime_version`."
   type        = string
-  default     = "syn-nodejs-puppeteer-9.1"
+  default     = "syn-nodejs-puppeteer-17.0"
 }
 
 variable "default_handler" {
